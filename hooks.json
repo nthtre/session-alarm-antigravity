@@ -1,0 +1,42 @@
+{
+  "session-alarm": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./scripts/agy_hook.mjs",
+        "timeout": 10
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "ask_question|run_command|edit_file|write_file|code_action|write_to_file|replace_file_content|multi_replace_file_content|read_file|view_file|mcp_.*|call_mcp_tool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/agy_hook.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "run_command|edit_file|write_file|code_action|write_to_file|replace_file_content|multi_replace_file_content|read_file|view_file|mcp_.*|call_mcp_tool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/agy_hook.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./scripts/agy_hook.mjs",
+        "timeout": 10
+      }
+    ]
+  }
+}

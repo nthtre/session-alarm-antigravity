@@ -1,0 +1,18 @@
+{
+  "name": "session-alarm",
+  "displayName": "Session Alarm",
+  "version": "1.2.1",
+  "description": "Local sound alerts for the Antigravity Desktop App (IDE/CLI untested), Codex, and Claude Code when the agent needs input, finishes work, or stops with an error.",
+  "logo": "assets/session-alarm-logo.svg",
+  "author": {
+    "name": "Danny",
+    "url": "https://github.com/djfksjd"
+  },
+  "homepage": "https://github.com/nthtre/session-alarm-antigravity",
+  "repository": "https://github.com/nthtre/session-alarm-antigravity",
+  "suggestedPrompts": [
+    "Show my Session Alarm status and current sound settings",
+    "Test all Session Alarm notification sounds",
+    "Configure Session Alarm sounds, volume, and quiet hours"
+  ]
+}
