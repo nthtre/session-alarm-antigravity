@@ -168,6 +168,8 @@ Antigravity 目前没有暴露「审批框真正弹出」的原生钩子事件�
   - **原因**：`core.py` 内置了 1.5 秒去重窗口，短时间连续多个同类事件（如同时弹出两个需要审批的动作）只响一次，避免音效叠音吵耳。
 - **处于免打扰时段或插件被停用**
   - **原因**：配置了 `quiet_hours` 或关闭了总开关；可运行 `session_alarm.py status` 确认当前状态。
+- **Antigravity 内置的联网访问与浏览器操控工具（不包含在提醒范围内）**
+  - **原因**：插件目前依赖 `PreToolUse` 启动 5 秒计时 + `PostToolUse` 取消计时来推断审批弹窗；而内置联网请求与浏览器操控（尤其是多步执行的浏览器子代理）正常执行本身就经常超过 5 秒且期间不触发 `PostToolUse`，如果纳入监听极易在自动放行时大量误报，因此刻意未加入匹配（通过 `mcp_*` 调用的外部浏览器/联网 MCP 工具或通过 `run_command` 执行的联网命令仍按各自规则触发）。
 
 ---
 
@@ -322,3 +324,5 @@ Because Antigravity does not currently provide a native hook event that fires on
   - **Why**: `core.py` enforces a 1.5-second deduplication window per `(event, source)` so simultaneous alerts do not overlap noisily.
 - **Quiet hours or disabled state**
   - **Why**: `quiet_hours` is active or `enabled` is `false` in your local config. Run `session_alarm.py status` to check.
+- **Antigravity built-in network access and browser-control tools (intentionally excluded)**
+  - **Why**: Without a native "approval dialog opened" hook event, the plugin relies on a 5-second `PreToolUse` → `PostToolUse` timer. Built-in network requests and browser automation (especially multi-step browser subagents) routinely take longer than 5 seconds even when auto-allowed, which would trigger frequent false alarms. They are therefore intentionally left unmatched (browser/network tools invoked via `mcp_*` or terminal `run_command` still follow their respective rules).
