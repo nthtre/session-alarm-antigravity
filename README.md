@@ -27,6 +27,7 @@
 - **中途报错停住了** → 响一声报错提示音
 - **完全本地运行** → 不联网、不发消息、不上传对话或代码，同时保留对 Codex 与 Claude Code 的兼容。
 
+> [!NOTE]
 > **适用范围说明**：本仓库的 Antigravity 适配**专用于 Antigravity 桌面端 App（Desktop App）**；**Antigravity IDE 与 Antigravity CLI 暂未适配与测试（不保证兼容）**，因为各端的权限配置文件、目录结构与交互机制存在差异。
 >
 > 本项目基于 [`djfksjd/session-alarm`](https://github.com/djfksjd/session-alarm)（MIT 开源协议）针对 **Antigravity 桌面端 App** 做了深度适配，与 Google / Antigravity、OpenAI、Anthropic 无任何官方关联。
@@ -55,9 +56,17 @@
 ## 3 步安装与常用命令
 
 ### 第 1 步：放进 Antigravity 插件目录
-把整个文件夹复制（或软链接）到 Antigravity 的全局插件目录，文件夹名字保持 `session-alarm`：
-- **Windows**：`%USERPROFILE%\.gemini\config\plugins\session-alarm`
-- **macOS / Linux**：`~/.gemini/config/plugins/session-alarm`
+可以直接用 `git clone` 一键拉取到 Antigravity 的全局插件目录（或下载 Release 压缩包解压/软链接到同路径），文件夹名字保持 `session-alarm`：
+
+**Windows (PowerShell)：**
+```powershell
+git clone https://github.com/nthtre/session-alarm-antigravity.git "$env:USERPROFILE\.gemini\config\plugins\session-alarm"
+```
+
+**macOS / Linux：**
+```bash
+git clone https://github.com/nthtre/session-alarm-antigravity.git "$HOME/.gemini/config/plugins/session-alarm"
+```
 
 然后在 Antigravity 插件面板里开启 **Session Alarm**，重启一轮新对话就会自动生效。
 
@@ -93,7 +102,8 @@ python3 "$CLI" custom add "/path/to/your-sound.wav" --name "My Alert" --id my-al
 python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 23:00-07:30
 ```
 
-> 小提醒：改声音或音量请用上面的 `configure` 命令，不要手动去改 `config.json`，命令会自动校验并生成对应音量的音频缓存。
+> [!TIP]
+> 改声音或音量请用上面的 `configure` 命令，不要手动去改 `config.json`，命令会自动校验并生成对应音量的音频缓存。
 
 ---
 
@@ -171,6 +181,7 @@ When Antigravity is working on a task, you don't have to keep staring at the cha
 - **Stopped with an error** → plays an error alert
 - **100% local & offline** → no accounts, no network requests, no telemetry. Also stays compatible with Codex and Claude Code.
 
+> [!NOTE]
 > **Compatibility Note**: The Antigravity adaptation in this repository is built **specifically for the Antigravity Desktop App**; **Antigravity IDE and Antigravity CLI are not adapted or tested (compatibility not guaranteed)**, as their permission configs, directory layouts, and interactions differ.
 >
 > Adapted for **Antigravity Desktop App** from [`djfksjd/session-alarm`](https://github.com/djfksjd/session-alarm) (MIT License). Independent open-source project, not affiliated with or endorsed by Google / Antigravity, OpenAI, or Anthropic.
@@ -199,9 +210,17 @@ When Antigravity is working on a task, you don't have to keep staring at the cha
 ## 3-Step Setup & Everyday Commands
 
 ### Step 1: Install into Antigravity's plugins folder
-Copy (or symlink) this folder into Antigravity's global plugins directory as `session-alarm`:
-- **Windows**: `%USERPROFILE%\.gemini\config\plugins\session-alarm`
-- **macOS / Linux**: `~/.gemini/config/plugins/session-alarm`
+Clone this repository directly into Antigravity's global plugins directory as `session-alarm` (or download a Release archive and copy/symlink it there):
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/nthtre/session-alarm-antigravity.git "$env:USERPROFILE\.gemini\config\plugins\session-alarm"
+```
+
+**macOS / Linux:**
+```bash
+git clone https://github.com/nthtre/session-alarm-antigravity.git "$HOME/.gemini/config/plugins/session-alarm"
+```
 
 Enable **Session Alarm** in Antigravity and start a new turn.
 
@@ -237,7 +256,8 @@ python3 "$CLI" custom add "/path/to/your-sound.wav" --name "My Alert" --id my-al
 python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 23:00-07:30
 ```
 
-> Tip: Always update settings through `configure` rather than editing `config.json` by hand so volume-scaled WAV caches are generated properly.
+> [!TIP]
+> Always update settings through `configure` rather than editing `config.json` by hand so volume-scaled WAV caches are generated properly.
 
 ---
 
