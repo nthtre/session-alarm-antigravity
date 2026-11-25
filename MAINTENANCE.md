@@ -1,6 +1,6 @@
 # Session Alarm 维护指南（Antigravity 适配版）
 
-本文档记录本插件针对 Antigravity 的增强逻辑、权限联动机制与后续 Antigravity 升级后的排查修复流程。
+本文档记录本插件针对 Antigravity 的 Sidecar 实时真弹窗监听与 Hook 自动兜底双架构、权限联动机制，以及 Antigravity 升级后的排查修复流程。
 
 ---
 
@@ -41,15 +41,24 @@
 
 ### 2.2 混合真弹窗检测：Sidecar 主检测 + Hook 自动兜底（`sidecars/watcher/` + `agy_hook.mjs`）
 - **Sidecar 实时真弹窗检测（主路径）**：
-  - `sidecars/watcher/watcher.mjs` 由 Antigravity 作为后台 Sidecar 启动并切出插件目录（防止 Windows 卸载/更新锁目录），通过本地回环 HTTP 调用 `GetAllCascadeTrajectories`（活跃对话时每 `500ms`、空闲时每 `2000ms` 轮询一次）。
-  - 通过 `WaitingTracker` 跟踪非空闲对话的 `waitingSteps` 数组，**仅在弹窗/等待输入真实出现（状态边沿跃迁）时**异步调用 `session_alarm.py` 触发 `attention`，并在 `history.jsonl` 记为 `hookEventName: "SidecarWaiting"`、`reason: "sidecar_waiting_step"`。
-  - Sidecar 每 `5000ms` 原子写入一次 `sidecar-state.json`（默认 TTL `15000ms`）。当 `agy_hook.mjs` 检测到 `sidecar-state.json` 健康且未过期时：
+  - `sidecars/watcher/watcher.mjs` 由 Antigravity 作为无头后台 Sidecar 启动并切出插件目录（`process.chdir(dataDir)` + 每 5 秒 `orphanCheck` 检查 `sidecar.json` + `SIGTERM`/`SIGINT` 退出清理，防止 Windows 卸载/更新锁目录），通过本地回环 HTTP 调用 `GetAllCascadeTrajectories`（活跃对话时每 `500ms`、空闲时每 `2000ms` 轮询一次）。
+  - 通过 `WaitingTracker` 跟踪非空闲对话的 `waitingSteps` 数组：
+    - 启动首轮仅建立基线（已有未处理弹窗不误响）；
+    - 按 `(conversationId, waitingKey)` 边沿触发（支持同一对话连续弹窗、多对话并发弹窗，并自动忽略 `IDLE` / `COMPLETED` / `DONE` 会话残留）；
+    - 可选 `SESSION_ALARM_SIDECAR_WAIT_GRACE_MS`（默认 `0`）确认宽限后，异步 `spawn` 调用 `session_alarm.py` 触发 `attention`（不阻塞轮询循环，并缓存可用 Python 路径）；
+    - 仅在内存中使用宿主注入的 `ANTIGRAVITY_CSRF_TOKEN` / `ANTIGRAVITY_SERVER_CSRF_TOKEN`，绝不落盘或写入日志。
+  - 状态与日志格式：
+    - `sidecar-state.json`：`{ pid, mode: "sidecar", healthy, updatedAtMs, reason?, consecutiveFailures? }`，每 `5000ms` 原子写入一次（默认 TTL `15000ms`）。
+    - `history.jsonl`：`{ timestamp, hookEventName: "SidecarWaiting", terminationReason: null, action: "triggered", reason: "sidecar_waiting_step", mappedEvent: "PermissionRequest", conversationId, waitingCount, waitingKey }`。
+  - 当 `agy_hook.mjs` 检测到 `sidecar-state.json` 健康且未过期时：
     - 抑制 `PreToolUse` 的 5 秒延迟计时器与 `ask_question` 立即播报（保留 `WRITE_TOOLS` 的 `ArtifactMetadata.RequestFeedback === true` 立即提醒，并由 `core.py` 1.5s 去重保护）；
     - 保持所有安全 `decision` 返回值不变（绝不强行返回 `"allow"` 绕过审批）。
 - **自动降级兜底（Fallback）**：
   - 若 `GetAllCascadeTrajectories` 连续失败 3 次（例如未来 Antigravity 升级更改了内部 RPC）、Sidecar 未启动/已退出，或设置了 `SESSION_ALARM_DISABLE_SIDECAR=1`，`sidecar-state.json` 立即标记 `healthy: false` 或超过 TTL，`agy_hook.mjs` 自动无缝切换回下方的 `PreToolUse` + `PostToolUse` + 5 秒延迟计时器方案。
 
-### 2.3 `PreToolUse` + `PostToolUse` 触发规则（`hooks.json` + `agy_hook.mjs` + `delay_alert_worker.mjs`）
+### 2.3 `PreToolUse` + `PostToolUse` 触发规则（Hook 兜底模式；`hooks.json` + `agy_hook.mjs` + `delay_alert_worker.mjs`）
+> [!NOTE]
+> 当 Sidecar 主检测健康运行时，`ask_question` 的立即播报与下方所有 5 秒延迟审批计时器均会被 `agy_hook.mjs` 自动抑制（交由 Sidecar 精准捕获 `waitingSteps`）；仅 `WRITE_TOOLS` 的 `ArtifactMetadata.RequestFeedback === true` 立即提醒与所有安全 `decision` 返回值保持生效。当 Sidecar 不可用或超过 TTL 时，下方规则自动接管兜底。
 - **`PreToolUse` matcher 范围**：
   `ask_question|run_command|edit_file|write_file|code_action|write_to_file|replace_file_content|multi_replace_file_content|read_file|view_file|mcp_.*|call_mcp_tool`
 - **`PostToolUse` matcher 范围**：
@@ -91,19 +100,22 @@
 
 ## 3. Antigravity 升级后的排查与修复清单（Runbook）
 
-当升级 Antigravity 后发现“不响、误响、或白名单失效”，按以下 4 步排查：
+当升级 Antigravity 后发现“不响、误响、Sidecar 降级或白名单失效”，按以下 5 步排查：
 
-1. **先看执行日志与 Sidecar 状态**：
-   - 检查状态目录下的 `sidecar-state.json`（确认 `healthy: true` 且 `updatedAtMs` 在最近 15 秒内，以及是否有 `reason: "rpc_unavailable"`）；
+1. **先看 Sidecar 状态与执行日志**：
+   - 检查状态目录下的 `sidecar-state.json`（确认 `healthy: true` 且 `updatedAtMs` 在最近 15 秒内，以及是否出现 `reason: "rpc_unavailable"` / `"missing_ls_endpoint"`）；
    - 读取状态目录下的 `history.jsonl` 最后 20 行，重点核对 `hookEventName`（`SidecarWaiting` / `PreToolUse` / `Stop`）、`toolName`、`action`（`triggered` / `skipped`）、`reason`、`mappedEvent`。
-2. **核对最新 Hook 协议**：查看 `~/.gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md`：
+2. **若 Sidecar 降级（`healthy: false` 或缺少 `sidecar-state.json`）**：
+   - 确认已在插件面板开关重启用过 **Session Alarm** 或重启 Antigravity（让宿主加载 `sidecars/watcher/sidecar.json`）。
+   - 检查 Antigravity 内部 RPC 路径（`/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories`）、认证头（`x-codeium-csrf-token`）或 `trajectorySummaries[id].waitingSteps` 字段结构是否随版本变更，必要时更新 `sidecars/watcher/watcher.mjs` 与 `sidecars/watcher/lib/waiting.mjs`。
+3. **核对最新 Hook 协议**：查看 `~/.gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md`：
    - 若官方新增了原生的审批弹窗事件（如原生 `PermissionRequest`），可直接替换 `PreToolUse` 里的权限启发式判断。
    - 检查工具名或参数名是否变化（如 `BypassSandbox`、`CommandLine`、`ArtifactMetadata.RequestFeedback`、`Path`）。
    - 检查 `Stop` 字段是否变化（`fullyIdle`、`continuationActive`、`terminationReason`、`transcriptPath`）。
-3. **核对权限配置联动（注意硬编码安全边界）**：
+4. **核对 Hook 兜底模式权限联动（注意硬编码安全边界）**：
    - Antigravity 对 `~/.gemini/config/config.json` 设有硬编码系统保护边界，会直接拒绝 AI 代理的 `read_file` 工具访问（`agy_hook.mjs` 作为外部 Node 进程直接读取本地文件，不受影响）。
    - **请勿让 AI 直接 `read_file` 读取 `config.json`**；应先通过 `history.jsonl` 中是否出现 `allowed_by_permission_grant` / `skipped_by_turbo_mode` 间接验证权限联动是否生效；仅在怀疑字段结构变化时，由用户手动贴出脱敏后的 `userSettings`（`permissionPreset`、`autoExecutionPolicy`、`nonWorkspaceFileAccessPolicy`、`globalPermissionGrants.allow`）与 `projects/*.json`（`projectResources.resources[].folderUri`、`permissionGrants`、`settings`）键名片段。
-4. **区分 Hook 问题还是音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；若 `test` 能正常出声但对话不响，说明问题在 `hooks.json` 或 `agy_hook.mjs`。注意：Windows 下若在受限终端沙箱中运行，`py -3` 或读取 `%APPDATA%\session-alarm\config.json` 可能因权限边界报错，请在普通 PowerShell 终端或沙箱外通过 uv 管理的 `python.exe` 执行 `status` / `test`。
+5. **区分 Sidecar/Hook 问题还是音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；若 `test` 能正常出声但对话不响，说明问题在 `sidecars/watcher/`、`hooks.json` 或 `agy_hook.mjs`。注意：Windows 下若在受限终端沙箱中运行，`py -3` 或读取 `%APPDATA%\session-alarm\config.json` 可能因权限边界报错，请在普通 PowerShell 终端或沙箱外通过 uv 管理的 `python.exe` 执行 `status` / `test`。
 
 ---
 
@@ -121,11 +133,11 @@ py -3 $CLI test complete
 py -3 $CLI test error
 ```
 
-### 静音隔离测试 `agy_hook.mjs`（不发声、不污染真实日志）
-调试钩子逻辑时，设置以下环境变量后再通过 stdin 喂入测试 JSON 给 `node scripts/agy_hook.mjs`：
+### 静音隔离测试 Sidecar 与 Hook（不发声、不污染真实日志）
+调试 Sidecar 或钩子逻辑时，设置以下环境变量后再运行 `node sidecars/watcher/watcher.mjs`（可配合本地 Mock HTTP 服务注入 `ANTIGRAVITY_LS_ADDRESS` / `ANTIGRAVITY_CSRF_TOKEN`）或通过 stdin 喂入测试 JSON 给 `node scripts/agy_hook.mjs`（设 `SESSION_ALARM_DISABLE_SIDECAR=1` 可强制测试 Hook 兜底链路）：
 - `SESSION_ALARM_DISABLE_AUDIO=1`（禁用播放）
 - `SESSION_ALARM_DISABLE_NOTIFICATIONS=1`（禁用桌面通知）
-- `SESSION_ALARM_HOME=<临时目录>`（隔离 `history.jsonl`、`pending/` 与配置）
+- `SESSION_ALARM_HOME=<临时目录>`（隔离 `history.jsonl`、`sidecar-state.json`、`pending/` 与配置）
 - `SESSION_ALARM_AGY_CONFIG_DIR=<临时目录>`（模拟不同 Antigravity 权限档位与白名单）
 - `SESSION_ALARM_DISABLE_SIDECAR=1`（强制关闭 Sidecar 真弹窗检测，切回纯 Hook + 5 秒计时兜底模式）
 - `SESSION_ALARM_SIDECAR_ACTIVE_POLL_MS` / `SESSION_ALARM_SIDECAR_IDLE_POLL_MS`（可选，Sidecar 轮询间隔毫秒，默认活跃 `500` / 空闲 `2000`）
@@ -142,7 +154,7 @@ py -3 $CLI test error
 
 ```text
 Antigravity 更新（或 Session Alarm 提示音出现异常）了。请先阅读插件目录下的 MAINTENANCE.md，
-再对比状态目录中的 history.jsonl 最近日志（重点看 allowed_by_permission_grant、skipped_by_turbo_mode 与 reason 字段）
+再对比状态目录中的 sidecar-state.json 心跳、history.jsonl 最近日志（重点看 SidecarWaiting、allowed_by_permission_grant、skipped_by_turbo_mode 与 reason 字段）
 以及 Antigravity 内置最新的 docs/hooks.md 协议（不要直接用 read_file 读取 ~/.gemini/config/config.json，以免触发硬编码系统保护边界；
-若怀疑权限字段名变更再向我索取脱敏后的键名结构），定位原因并修复 hooks.json / agy_hook.mjs / core.py，最后用静音隔离环境变量测试验证。
+若怀疑权限字段名变更再向我索取脱敏后的键名结构），定位原因并修复 sidecars/watcher/ / hooks.json / agy_hook.mjs / core.py，最后用静音隔离环境变量测试验证。
 ```

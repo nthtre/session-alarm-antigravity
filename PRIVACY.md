@@ -1,7 +1,7 @@
 # Privacy
 
 Session Alarm runs entirely locally and does not include analytics, telemetry, accounts,
-advertising, or network requests.
+advertising, or external network requests (the local Antigravity Sidecar communicates strictly over loopback).
 
 ## Data used by lifecycle hooks
 

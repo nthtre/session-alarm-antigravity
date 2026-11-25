@@ -1,11 +1,11 @@
 ---
 name: session-alarm
-description: Configure, preview, test, enable, disable, or troubleshoot the Session Alarm plugin. Use for Session Alarm first-run setup and settings changes; do not invoke for ordinary coding-agent notifications because lifecycle hooks handle those automatically.
+description: Configure, preview, test, enable, disable, or troubleshoot the Session Alarm plugin. Use for Session Alarm first-run setup and settings changes; do not invoke for ordinary coding-agent notifications because lifecycle hooks and the Antigravity watcher sidecar handle those automatically.
 ---
 
 # Session Alarm configuration
 
-Use the bundled local CLI to manage Session Alarm. Notifications themselves are hook-driven;
+Use the bundled local CLI to manage Session Alarm. Notifications themselves are driven by lifecycle hooks and (in Antigravity Desktop App) the local watcher sidecar (`sidecars/watcher/`);
 this skill exists only for explicit configuration, preview, status, testing, and troubleshooting.
 
 ## Locate the CLI
@@ -15,7 +15,7 @@ The entry point is `<plugin-root>/scripts/session_alarm.py`.
 
 - In Claude Code, prefer `session-alarm` when the plugin-provided `bin/` directory is on `PATH`.
 - Otherwise run `python3 <absolute-plugin-root>/scripts/session_alarm.py`.
-- On Windows, use `py -3 <absolute-plugin-root>\scripts\session_alarm.py`.
+- On Windows, use `py -3 <absolute-plugin-root>\scripts\session_alarm.py` (or a `uv`-managed `python.exe` under `%APPDATA%\uv\python\cpython-*\python.exe`).
 - Never download audio or send configuration to a remote service.
 
 ## First-run setup
@@ -61,5 +61,6 @@ file-level provenance, public-preview source hashes, and processing details.
 - Temporarily disable: `configure --enabled off`
 - Re-enable: `configure --enabled on`
 - Reset first-run state: `reset --yes`
+- Troubleshoot Antigravity notifications: inspect `sidecar-state.json` and `history.jsonl` in the state directory, and consult `MAINTENANCE.md` at the plugin root.
 
 Do not edit `config.json` by hand. Use the CLI so settings are validated and written atomically.
