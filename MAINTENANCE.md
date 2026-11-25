@@ -56,14 +56,14 @@
     - `command(...)`：整条精确匹配、命令前缀（空格/制表符边界）、`*` 通配符
     - `write_file(...)` / `edit_file(...)` / `read_file(...)`：路径大小写与斜杠归一化、目录前缀、`*`/`**` 通配符
     - MCP 授权：`mcp(...)` / `call_mcp_tool(...)` / 裸 `server/tool` / `mcp_*` 精确或通配符匹配；也支持通过 `SESSION_ALARM_SKIP_MCP_PREFIXES` 跳过自定义受信任前缀（默认不跳过任何前缀）。
-  - 权限档位策略：
+  - 权限档位策略（`parseCommandMode` 同时兼容旧版枚举 `TURBO` / `EAGER` / `OFF` / `AUTO` / `DEFAULT` 与新版策略名 `always-proceed` / `request-review` / `strict` / `proceed-in-sandbox`）：
     - **极速（Turbo）**：命令、工作区外写文件、以及 `read_file`/`view_file`/`mcp_.*` 延迟提醒均静默跳过（其中 `read_file`/`view_file`/`mcp_.*` 仍返回 `{ decision: "ask" }`）
     - **自动（Auto）/ 默认（Default）**：沙箱外 `run_command`（`BypassSandbox: true`）、工作区外写文件（均查白名单未命中时）与 `read_file`/`view_file`/`mcp_.*`/`call_mcp_tool` 均启用 `5000ms` 延迟审批提醒
     - **请求审查（Review）**：所有 `run_command`（含沙箱内）、工作区外写文件（均查白名单未命中时）与 `read_file`/`view_file`/`mcp_.*`/`call_mcp_tool` 均启用 `5000ms` 延迟审批提醒
 - **安全不变量**：对于命中白名单的外部写文件、待审查命令，以及 `read_file`/`view_file`/`mcp_.*`，`agy_hook.mjs` 一律返回 `{ decision: "ask" }`（绝不替 Antigravity 强行返回 `"allow"`），由 Antigravity 自身的权限缓存决定放行或弹窗。
 
 ### 2.3 `Stop` 触发规则（`agy_hook.mjs` + `core.py`）
-- **静默过滤**：子代理会话（无 `USER_INPUT`）、`USER_CANCELED`、`RUNNING` 后台任务、异步委派（`invoke_subagent`/`send_message`/`schedule`）、`continuationActive`、`fullyIdle === false` 均直接跳过。
+- **静默过滤**：子代理会话（无 `USER_INPUT`）、`USER_CANCELED`、`RUNNING` 后台任务、异步委派与交接/等待工具（`invoke_subagent` / `send_message` / `schedule` / `exit_plan_mode` / `swarm_wait`）、`continuationActive`、`fullyIdle === false` 均直接跳过（`run_workflow` 支持 `WaitMsBeforeAsync` 同步返回，继续由 `fullyIdle === false` 与 `RUNNING` 步骤状态兜底）。
 - **不根据回复问句猜 `attention`**：`event_from_hook` 的 `Stop` 分支不调用 `stop_needs_input`，正常结束只区分 `error` 与 `complete`。
 - **错误检测（`StopFailure` 或 `stop_has_error`）**：
   - `StopFailure`（`terminationReason === "ERROR"` 或带 `error`）直接归为 `error`。
@@ -84,8 +84,10 @@
    - 若官方新增了原生的审批弹窗事件（如原生 `PermissionRequest`），可直接替换 `PreToolUse` 里的权限启发式判断。
    - 检查工具名或参数名是否变化（如 `BypassSandbox`、`CommandLine`、`ArtifactMetadata.RequestFeedback`、`Path`）。
    - 检查 `Stop` 字段是否变化（`fullyIdle`、`continuationActive`、`terminationReason`、`transcriptPath`）。
-3. **核对权限配置文件结构**：检查 `~/.gemini/config/config.json`（`userSettings.permissionPreset`、`autoExecutionPolicy`、`nonWorkspaceFileAccessPolicy`、`globalPermissionGrants.allow`）与 `~/.gemini/config/projects/*.json`（`projectResources.resources[].folderUri`、`permissionGrants`、`settings`）字段名是否变更。
-4. **区分 Hook 问题还是音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；若 `test` 能正常出声但对话不响，说明问题在 `hooks.json` 或 `agy_hook.mjs`。
+3. **核对权限配置联动（注意硬编码安全边界）**：
+   - Antigravity 对 `~/.gemini/config/config.json` 设有硬编码系统保护边界，会直接拒绝 AI 代理的 `read_file` 工具访问（`agy_hook.mjs` 作为外部 Node 进程直接读取本地文件，不受影响）。
+   - **请勿让 AI 直接 `read_file` 读取 `config.json`**；应先通过 `history.jsonl` 中是否出现 `allowed_by_permission_grant` / `skipped_by_turbo_mode` 间接验证权限联动是否生效；仅在怀疑字段结构变化时，由用户手动贴出脱敏后的 `userSettings`（`permissionPreset`、`autoExecutionPolicy`、`nonWorkspaceFileAccessPolicy`、`globalPermissionGrants.allow`）与 `projects/*.json`（`projectResources.resources[].folderUri`、`permissionGrants`、`settings`）键名片段。
+4. **区分 Hook 问题还是音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；若 `test` 能正常出声但对话不响，说明问题在 `hooks.json` 或 `agy_hook.mjs`。注意：Windows 下若在受限终端沙箱中运行，`py -3` 或读取 `%APPDATA%\session-alarm\config.json` 可能因权限边界报错，请在普通 PowerShell 终端或沙箱外通过 uv 管理的 `python.exe` 执行 `status` / `test`。
 
 ---
 
@@ -120,6 +122,7 @@ py -3 $CLI test error
 
 ```text
 Antigravity 更新（或 Session Alarm 提示音出现异常）了。请先阅读插件目录下的 MAINTENANCE.md，
-再对比状态目录中的 history.jsonl 最近日志、Antigravity 内置最新的 docs/hooks.md 协议
-以及 ~/.gemini/config/config.json 权限结构，定位原因并修复 hooks.json / agy_hook.mjs / core.py，最后用静音隔离环境变量测试验证。
+再对比状态目录中的 history.jsonl 最近日志（重点看 allowed_by_permission_grant、skipped_by_turbo_mode 与 reason 字段）
+以及 Antigravity 内置最新的 docs/hooks.md 协议（不要直接用 read_file 读取 ~/.gemini/config/config.json，以免触发硬编码系统保护边界；
+若怀疑权限字段名变更再向我索取脱敏后的键名结构），定位原因并修复 hooks.json / agy_hook.mjs / core.py，最后用静音隔离环境变量测试验证。
 ```

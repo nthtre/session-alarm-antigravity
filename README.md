@@ -47,7 +47,7 @@
 1. **看得到窗再叫你**：命令、跨对话读文件、工作区外改文件、MCP 工具等，插件会先等 **5 秒**。如果 Antigravity 自己放行了，或者你刚好在屏幕前 5 秒内点完允许、操作顺利完成，闹钟会自动取消——**彻底静音不吵人**；只有弹窗真的卡在屏幕上超过 5 秒等你处理时，才响起提醒，你一抬头弹窗稳稳就在那儿。
 2. **明确要你选的立刻响**：选择题（`ask_question`）和请求审阅文档（`Proceed`）会在后台立刻响，同时不拖慢弹窗弹出来的速度。
 3. **这些情况全都不误响**：
-   - 后台子代理（subagent）悄悄干活、后台任务还没跑完、或者你自己手动点取消；
+   - 后台子代理（subagent）悄悄干活、后台任务还没跑完、Plan→Execute 交接（`exit_plan_mode`）或 Swarm 等待（`swarm_wait`）、或者你自己手动点取消；
    - 在当前工作区或当前对话自己的目录里正常读写文件；
    - 你在 Antigravity 设置里选了**极速（Turbo）模式**，或把某个命令 / 路径 / MCP 加进了「**总是允许**」白名单（插件会实时同步你的设置）。
 
@@ -203,7 +203,7 @@ When Antigravity is working on a task, you don't have to keep staring at the cha
 1. **Popup-first timing**: Approval-gated commands, outside-workspace edits, cross-conversation reads, and MCP tools arm a **5-second timer** first. If Antigravity auto-allows the call or you approve it right away, `PostToolUse` cancels the timer silently. Only when a popup is genuinely sitting there waiting for you after 5 seconds does the alarm ring — so when you look over, the popup is already on screen.
 2. **Instant background alerts**: Multiple-choice questions (`ask_question`) and reviewable docs (`RequestFeedback`) play immediately via a detached background worker without slowing down popup rendering.
 3. **What stays completely quiet**:
-   - Subagent runs, turns still waiting on background tasks, or manual cancellation (`USER_CANCELED`);
+   - Subagent runs, turns still waiting on background tasks, Plan-to-Execute handoffs (`exit_plan_mode`), Swarm waits (`swarm_wait`), or manual cancellation (`USER_CANCELED`);
    - Normal reads/writes inside your workspace or the current conversation's own artifact folder;
    - **Turbo mode** and anything matched by your Antigravity **"Always Allow"** rules (`config.json` & `projects/*.json` are read live in read-only mode).
 

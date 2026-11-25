@@ -33,7 +33,13 @@ try {
 }
 
 const hookEvent = payload.hookEventName || "";
-const ASYNC_DELEGATION_TOOLS = new Set(["invoke_subagent", "send_message", "schedule"]);
+const ASYNC_DELEGATION_TOOLS = new Set([
+  "invoke_subagent",
+  "send_message",
+  "schedule",
+  "exit_plan_mode",
+  "swarm_wait",
+]);
 const WRITE_TOOLS = new Set([
   "edit_file",
   "write_file",
@@ -96,7 +102,7 @@ function readJsonSafe(filePath) {
 function parseCommandMode(preset, autoExec) {
   const p = typeof preset === "string" ? preset.trim().toUpperCase() : "";
   if (p) {
-    if (p.includes("TURBO") || p.includes("EAGER")) return "turbo";
+    if (p.includes("TURBO") || p.includes("EAGER") || p.includes("ALWAYS")) return "turbo";
     if (
       p.includes("REVIEW") ||
       p.includes("OFF") ||
@@ -106,13 +112,22 @@ function parseCommandMode(preset, autoExec) {
     ) {
       return "review";
     }
-    if (p.includes("DEFAULT")) return "default";
+    if (p.includes("DEFAULT") || p.includes("SANDBOX")) return "default";
     if (p.includes("AUTO")) return "auto";
   }
   const a = typeof autoExec === "string" ? autoExec.trim().toUpperCase() : "";
   if (a) {
-    if (a.includes("TURBO") || a.includes("EAGER")) return "turbo";
-    if (a.includes("OFF")) return "review";
+    if (a.includes("TURBO") || a.includes("EAGER") || a.includes("ALWAYS")) return "turbo";
+    if (
+      a.includes("REVIEW") ||
+      a.includes("OFF") ||
+      a.includes("MANUAL") ||
+      a.includes("STRICT") ||
+      a.includes("ASK")
+    ) {
+      return "review";
+    }
+    if (a.includes("DEFAULT") || a.includes("SANDBOX")) return "default";
     if (a.includes("AUTO")) return "auto";
   }
   return "auto";
