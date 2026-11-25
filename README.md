@@ -38,18 +38,18 @@
 
 | 声音类型 | 什么时候触发 | 默认声音 |
 |---|---|---|
-| **`attention`（等你操作）** | 弹出选择题、需要你点审阅 `Proceed`、或审批弹窗停留超过 **5 秒** | `cat`（猫） |
+| **`attention`（等你操作）** | **真弹窗 / 等待输入出现后 ~0.5 秒内立即提醒**（Sidecar 模式）；若内部接口不可用则自动兜底为「选择题/审阅立即响，其余审批等待 **5 秒**」 | `cat`（猫） |
 | **`complete`（干完了）** | 主对话这一轮正常跑完（支持中文总结，结尾带问句也不会误响成审批） | `rooster`（公鸡） |
 | **`error`（出错了）** | 会话异常中断，或回复末尾出现中 / 英 / 韩文报错提示 | `crow`（乌鸦） |
 | **`session_end`（会话关闭）** | Antigravity 下默认静音，不打扰 | `owl`（猫头鹰） |
 
-### 为什么叫「5 秒防扑空」？
-1. **看得到窗再叫你**：命令、跨对话读文件、工作区外改文件、MCP 工具等，插件会先等 **5 秒**。如果 Antigravity 自己放行了，或者你刚好在屏幕前 5 秒内点完允许、操作顺利完成，闹钟会自动取消——**彻底静音不吵人**；只有弹窗真的卡在屏幕上超过 5 秒等你处理时，才响起提醒，你一抬头弹窗稳稳就在那儿。
-2. **明确要你选的立刻响**：选择题（`ask_question`）和请求审阅文档（`Proceed`）会在后台立刻响，同时不拖慢弹窗弹出来的速度。
+### 为什么「既能毫秒级真弹窗提醒，又不误响」？
+1. **Sidecar 真弹窗检测（主方案）**：后台轻量 Sidecar（`sidecars/watcher/`）直接向 Antigravity 本地语言服务器查询 `GetAllCascadeTrajectories` 的 `waitingSteps` 状态。**只有真正弹出审批框、选择题或等待你确认时才在 ~0.5 秒内响起**——哪怕你点了「在此会话中始终允许」之后跑一个 24 秒的 `git push`，或者 Auto 模式安全评估慢了几秒，都不会再误响或先响后弹窗。
+2. **Hook 5 秒防扑空（自动兜底）**：`GetAllCascadeTrajectories` 属于 Antigravity 本地未公开接口；如果未来版本更新导致该接口不可用（连续失败 3 次）或 Sidecar 未运行，插件会**自动无缝降级回官方 `PreToolUse` / `PostToolUse` + 5 秒延迟计时器模式**，保证提醒不断档。
 3. **这些情况全都不误响**：
    - 后台子代理（subagent）悄悄干活、后台任务还没跑完、Plan→Execute 交接（`exit_plan_mode`）或 Swarm 等待（`swarm_wait`）、或者你自己手动点取消；
    - 在当前工作区或当前对话自己的目录里正常读写文件；
-   - 你在 Antigravity 设置里选了**极速（Turbo）模式**，或把某个命令 / 路径 / MCP 加进了「**总是允许**」白名单（插件会实时同步你的设置）。
+   - 未弹窗的常规工具执行（包括联网工具、浏览器、慢速 MCP 与会话级免审批命令，在 Sidecar 模式下均不误响）。
 
 ---
 
@@ -122,12 +122,16 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 <details>
 <summary>进阶环境变量与维护排查</summary>
 
-- 延迟闹钟默认全部为 `5000` 毫秒（5 秒），可用正整数毫秒环境变量单独微调：
+- Sidecar 真弹窗检测可调环境变量（一般无需修改）：
+  - `SESSION_ALARM_DISABLE_SIDECAR=1`（禁用 Sidecar，强制使用纯 Hook + 5 秒计时兜底模式）
+  - `SESSION_ALARM_SIDECAR_ACTIVE_POLL_MS` / `SESSION_ALARM_SIDECAR_IDLE_POLL_MS`（Sidecar 轮询周期毫秒，默认活跃 `500` / 空闲 `2000`）
+  - `SESSION_ALARM_SIDECAR_WAIT_GRACE_MS`（检测到弹窗后的延迟宽限毫秒，默认 `0`）
+- Hook 兜底模式下的延迟闹钟默认全部为 `5000` 毫秒（5 秒），可用正整数毫秒环境变量单独微调：
   - `SESSION_ALARM_DELAY_READ_MS`（读文件）
   - `SESSION_ALARM_DELAY_WRITE_MS`（工作区外写文件）
   - `SESSION_ALARM_DELAY_COMMAND_MS`（待审查命令）
   - `SESSION_ALARM_DELAY_MCP_MS`（MCP 工具）
-- `SESSION_ALARM_SKIP_MCP_PREFIXES`：可选，逗号分隔的受信任 MCP 前缀（默认不跳过；例如设为 `mcp_myserver_` 可跳过对应工具的延迟提醒）。
+- `SESSION_ALARM_SKIP_MCP_PREFIXES`：可选，逗号分隔的受信任 MCP 前缀（仅在 Hook 兜底模式下生效，默认不跳过；例如设为 `mcp_myserver_` 可跳过对应工具的延迟提醒）。
 - 校验内置 12 个音频完整性：`python3 scripts/verify_builtin_sounds.py`
 - 详细架构、排查流程与静音测试说明见 [MAINTENANCE.md](MAINTENANCE.md)。
 
@@ -141,7 +145,7 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 
 ## 已知边界：可能的误报与漏报（及原因）
 
-Antigravity 目前没有暴露「审批框真正弹出」的原生钩子事件，插件是通过**读设置白名单 + 5 秒完成计时**来推断的，因此有以下几种边界情况：
+正常情况下插件通过 **Sidecar 监听本地语言服务器的 `waitingSteps` 状态** 来精准识别真弹窗，以下前几条「5 秒推断边界」仅在 Sidecar 不可用并**自动降级回 Hook 兜底模式**时才会出现：
 
 ### 1. 可能会多响（误报）的情况
 - **点了「在此会话中始终允许」后，执行超过 5 秒的沙箱外命令或慢速 MCP**
@@ -194,18 +198,18 @@ When Antigravity is working on a task, you don't have to keep staring at the cha
 
 | Event | When it triggers | Default sound |
 |---|---|---|
-| **`attention`** | Multiple-choice prompt, document review (`Proceed`), or an approval popup waiting **> 5 seconds** | `cat` |
+| **`attention`** | **Sidecar mode**: rings within ~0.5s when a real popup/input wait opens; **Hook fallback**: instant for prompts/reviews, **> 5s** timer for other gated tools | `cat` |
 | **`complete`** | Main conversation turn finishes normally (even if the summary ends with a question) | `rooster` |
 | **`error`** | Turn terminates with an error, or ends with an English / Chinese / Korean error statement | `crow` |
 | **`session_end`** | Silenced by default in Antigravity | `owl` |
 
-### How the "5-second smart wait" avoids false alarms
-1. **Popup-first timing**: Approval-gated commands, outside-workspace edits, cross-conversation reads, and MCP tools arm a **5-second timer** first. If Antigravity auto-allows the call or you approve it right away, `PostToolUse` cancels the timer silently. Only when a popup is genuinely sitting there waiting for you after 5 seconds does the alarm ring — so when you look over, the popup is already on screen.
-2. **Instant background alerts**: Multiple-choice questions (`ask_question`) and reviewable docs (`RequestFeedback`) play immediately via a detached background worker without slowing down popup rendering.
+### How "Sidecar Popup Detection + Hook Fallback" works
+1. **Real-time Sidecar watcher (primary)**: A lightweight background Sidecar (`sidecars/watcher/`) polls Antigravity's local language server (`GetAllCascadeTrajectories` → `waitingSteps`) every `500ms` while active (`2000ms` when idle). Alerts fire **only when a real approval popup or input prompt is waiting** — eliminating false alarms on session-allowed slow commands (e.g., `git push`), Auto-mode evaluation lag, or local permission toggles.
+2. **Automatic 5-second Hook fallback**: Because `GetAllCascadeTrajectories` is an undocumented internal RPC, if a future Antigravity update changes it (3 consecutive failures) or the Sidecar is stopped, `agy_hook.mjs` automatically falls back to the `PreToolUse` + `PostToolUse` + 5-second timer heuristic.
 3. **What stays completely quiet**:
    - Subagent runs, turns still waiting on background tasks, Plan-to-Execute handoffs (`exit_plan_mode`), Swarm waits (`swarm_wait`), or manual cancellation (`USER_CANCELED`);
    - Normal reads/writes inside your workspace or the current conversation's own artifact folder;
-   - **Turbo mode** and anything matched by your Antigravity **"Always Allow"** rules (`config.json` & `projects/*.json` are read live in read-only mode).
+   - Any non-prompting tool execution (in Sidecar mode, slow allowed commands, network/browser steps, and slow MCPs never cause false alarms).
 
 ---
 
@@ -278,12 +282,16 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 <details>
 <summary>Optional environment variables & troubleshooting</summary>
 
-- All delayed approval thresholds default to `5000` ms (5 seconds) and can be overridden with positive integer milliseconds:
+- Optional Sidecar watcher settings (defaults work out of the box):
+  - `SESSION_ALARM_DISABLE_SIDECAR=1` (disable Sidecar and force 5-second Hook fallback mode)
+  - `SESSION_ALARM_SIDECAR_ACTIVE_POLL_MS` / `SESSION_ALARM_SIDECAR_IDLE_POLL_MS` (poll intervals in ms; default `500` active / `2000` idle)
+  - `SESSION_ALARM_SIDECAR_WAIT_GRACE_MS` (optional grace delay after `waitingSteps` appears; default `0`)
+- In Hook fallback mode, all delayed approval thresholds default to `5000` ms (5 seconds) and can be overridden with positive integer milliseconds:
   - `SESSION_ALARM_DELAY_READ_MS` (`read_file` / `view_file`)
   - `SESSION_ALARM_DELAY_WRITE_MS` (outside-workspace writes)
   - `SESSION_ALARM_DELAY_COMMAND_MS` (approval-gated `run_command`)
   - `SESSION_ALARM_DELAY_MCP_MS` (`mcp_*` / `call_mcp_tool`)
-- `SESSION_ALARM_SKIP_MCP_PREFIXES`: optional comma-separated trusted MCP prefixes to skip (empty by default; e.g., `mcp_myserver_`).
+- `SESSION_ALARM_SKIP_MCP_PREFIXES`: optional comma-separated trusted MCP prefixes to skip in Hook fallback mode (empty by default; e.g., `mcp_myserver_`).
 - Verify the 12 bundled CC0 WAV files offline: `python3 scripts/verify_builtin_sounds.py`
 - Full technical reference & isolated hook testing guide: [MAINTENANCE.md](MAINTENANCE.md).
 
@@ -297,7 +305,7 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 
 ## Known Limitations: Possible False Alarms & Missed Alerts (and Why)
 
-Because Antigravity does not currently provide a native hook event that fires only when a permission dialog is rendered, the plugin infers popups from on-disk settings + a 5-second completion timer. That leads to a few known edge cases:
+Normally the Sidecar watcher detects real approval dialogs directly via the local language server's `waitingSteps`. The 5-second timer caveats below apply only when the Sidecar is unavailable and Session Alarm **automatically falls back to Hook mode**:
 
 ### 1. Possible False Alarms
 - **Long (> 5s) unsandboxed commands or slow MCPs approved with "Always allow for this session"**

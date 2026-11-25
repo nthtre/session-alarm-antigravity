@@ -15,11 +15,14 @@
 | 路径 | 作用 |
 |---|---|
 | `hooks.json` | 生命周期钩子注册，监听 `SessionStart`、`PreToolUse`、`PostToolUse`（`run_command\|edit_file\|...\|read_file\|view_file\|mcp_.*\|call_mcp_tool`）、`Stop` |
-| `scripts/agy_hook.mjs` | Antigravity 钩子适配器：实时只读加载全局/项目权限与白名单、管理延迟审批计时器、动态探测 Python、过滤子代理/后台任务、记录 `history.jsonl`、调用 `session_alarm.py` |
-| `scripts/delay_alert_worker.mjs` | 脱离后台延迟计时子进程：等待 `delayMs` 后检查 `pending/<toolCallId>.json`，未被取消则写日志并调用 `session_alarm.py` 触发 `PermissionRequest` |
+| `sidecars/watcher/sidecar.json` | 无头 Sidecar 清单：向 Antigravity 注册后台常驻进程（`restart_policy: "always"`），由宿主注入 `ANTIGRAVITY_LS_ADDRESS` 与 `ANTIGRAVITY_CSRF_TOKEN` |
+| `sidecars/watcher/watcher.mjs` | Sidecar 监听主进程：轮询本地语言服务器 `GetAllCascadeTrajectories` 的 `waitingSteps`，仅在真实弹窗出现时异步触发 `PermissionRequest`，并每 5 秒写 `sidecar-state.json` 心跳 |
+| `sidecars/watcher/lib/waiting.mjs` | 纯函数模块：`parseLsEndpoint`、`extractTrajectories` 与 `WaitingTracker` 边沿状态跟踪 |
+| `scripts/agy_hook.mjs` | Antigravity 钩子适配器：优先检测 `sidecar-state.json`（健康且未过期时抑制 5 秒延迟计时器与 `ask_question` 重复触发）；Sidecar 不可用时自动无缝回退至原有白名单 + 5 秒延迟审批方案，并始终负责 `SessionStart` 与 `Stop` |
+| `scripts/delay_alert_worker.mjs` | 脱离后台延迟计时子进程（Hook 兜底模式下使用）：等待 `delayMs` 后检查 `pending/<toolCallId>.json`，未被取消则写日志并调用 `session_alarm.py` 触发 `PermissionRequest` |
 | `session_alarm/core.py` | 事件分类（`event_from_hook`）、中文/英文/韩文报错识别（`stop_has_error`）、Windows 同步音频播放（`winsound`） |
 | `scripts/session_alarm.py` / `session_alarm/cli.py` | CLI 配置、自定义 WAV 导入、试播与测试入口 |
-| `%APPDATA%\session-alarm\`（Win）<br>`~/.config/session-alarm/`（Unix） | 运行时状态目录：`config.json`、`custom-sounds.json`、`custom/*.wav`、`history.jsonl`、`runtime.json`、`pending/`（短生命周期计时器标记） |
+| `%APPDATA%\session-alarm\`（Win）<br>`~/.config/session-alarm/`（Unix） | 运行时状态目录：`config.json`、`custom-sounds.json`、`custom/*.wav`、`history.jsonl`、`runtime.json`、`sidecar-state.json`（Sidecar 心跳）、`pending/`（兜底短生命周期计时器标记） |
 | `~/.gemini/config/config.json` | Antigravity 全局配置（只读）：`userSettings` 权限档位与 `globalPermissionGrants.allow` |
 | `~/.gemini/config/projects/*.json` | Antigravity 项目级配置（只读）：`projectResources`、`permissionGrants`、`settings` |
 | `~/.gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md` | Antigravity 随版本更新的内置 Hook 协议文档（升级后排查首要参考） |
@@ -36,7 +39,17 @@
 
 用户可通过 `session_alarm.py custom add` 与 `configure` 在本机自行替换为任意合法本地 WAV。
 
-### 2.2 `PreToolUse` + `PostToolUse` 触发规则（`hooks.json` + `agy_hook.mjs` + `delay_alert_worker.mjs`）
+### 2.2 混合真弹窗检测：Sidecar 主检测 + Hook 自动兜底（`sidecars/watcher/` + `agy_hook.mjs`）
+- **Sidecar 实时真弹窗检测（主路径）**：
+  - `sidecars/watcher/watcher.mjs` 由 Antigravity 作为后台 Sidecar 启动并切出插件目录（防止 Windows 卸载/更新锁目录），通过本地回环 HTTP 调用 `GetAllCascadeTrajectories`（活跃对话时每 `500ms`、空闲时每 `2000ms` 轮询一次）。
+  - 通过 `WaitingTracker` 跟踪非空闲对话的 `waitingSteps` 数组，**仅在弹窗/等待输入真实出现（状态边沿跃迁）时**异步调用 `session_alarm.py` 触发 `attention`，并在 `history.jsonl` 记为 `hookEventName: "SidecarWaiting"`、`reason: "sidecar_waiting_step"`。
+  - Sidecar 每 `5000ms` 原子写入一次 `sidecar-state.json`（默认 TTL `15000ms`）。当 `agy_hook.mjs` 检测到 `sidecar-state.json` 健康且未过期时：
+    - 抑制 `PreToolUse` 的 5 秒延迟计时器与 `ask_question` 立即播报（保留 `WRITE_TOOLS` 的 `ArtifactMetadata.RequestFeedback === true` 立即提醒，并由 `core.py` 1.5s 去重保护）；
+    - 保持所有安全 `decision` 返回值不变（绝不强行返回 `"allow"` 绕过审批）。
+- **自动降级兜底（Fallback）**：
+  - 若 `GetAllCascadeTrajectories` 连续失败 3 次（例如未来 Antigravity 升级更改了内部 RPC）、Sidecar 未启动/已退出，或设置了 `SESSION_ALARM_DISABLE_SIDECAR=1`，`sidecar-state.json` 立即标记 `healthy: false` 或超过 TTL，`agy_hook.mjs` 自动无缝切换回下方的 `PreToolUse` + `PostToolUse` + 5 秒延迟计时器方案。
+
+### 2.3 `PreToolUse` + `PostToolUse` 触发规则（`hooks.json` + `agy_hook.mjs` + `delay_alert_worker.mjs`）
 - **`PreToolUse` matcher 范围**：
   `ask_question|run_command|edit_file|write_file|code_action|write_to_file|replace_file_content|multi_replace_file_content|read_file|view_file|mcp_.*|call_mcp_tool`
 - **`PostToolUse` matcher 范围**：
@@ -62,7 +75,7 @@
     - **请求审查（Review）**：所有 `run_command`（含沙箱内）、工作区外写文件（均查白名单未命中时）与 `read_file`/`view_file`/`mcp_.*`/`call_mcp_tool` 均启用 `5000ms` 延迟审批提醒
 - **安全不变量**：对于命中白名单的外部写文件、待审查命令，以及 `read_file`/`view_file`/`mcp_.*`，`agy_hook.mjs` 一律返回 `{ decision: "ask" }`（绝不替 Antigravity 强行返回 `"allow"`），由 Antigravity 自身的权限缓存决定放行或弹窗。
 
-### 2.3 `Stop` 触发规则（`agy_hook.mjs` + `core.py`）
+### 2.4 `Stop` 触发规则（`agy_hook.mjs` + `core.py`）
 - **静默过滤**：子代理会话（无 `USER_INPUT`）、`USER_CANCELED`、`RUNNING` 后台任务、异步委派与交接/等待工具（`invoke_subagent` / `send_message` / `schedule` / `exit_plan_mode` / `swarm_wait`）、`continuationActive`、`fullyIdle === false` 均直接跳过（`run_workflow` 支持 `WaitMsBeforeAsync` 同步返回，继续由 `fullyIdle === false` 与 `RUNNING` 步骤状态兜底）。
 - **不根据回复问句猜 `attention`**：`event_from_hook` 的 `Stop` 分支不调用 `stop_needs_input`，正常结束只区分 `error` 与 `complete`。
 - **错误检测（`StopFailure` 或 `stop_has_error`）**：
@@ -70,8 +83,9 @@
   - 检查回复末尾 700 字符：除原版英文/韩文正则外，`_has_chinese_error` 会先剔除 Markdown 代码块与行内反引号，按标点分句后过滤含 `已修复`、`已解决`、`无报错`、`0 个失败`、`如果/假如` 等否定/假设词的分句，再匹配中文报错表达。
   - 其余正常完成一律归为 `complete`。
 
-### 2.4 已知边界
-- 聊天界面左下角「本地权限」的**单对话临时切换**仅保存在 Antigravity 内存会话状态中，不会写入 `config.json`、`projects/*.json` 或 `transcript.jsonl`，外部钩子无法感知；**全局/项目设置页面修改**及**「总是允许」增删**均可 100% 实时同步。
+### 2.5 已知边界
+- **Hook 兜底模式下**：聊天界面左下角「本地权限」的**单对话临时切换**以及弹窗上的「在此会话中始终允许」仅保存在 Antigravity 内存会话状态中，不会写入 `config.json`、`projects/*.json` 或 `transcript.jsonl`，外部钩子无法感知；**全局/项目设置页面修改**及**「总是允许」增删**均可 100% 实时同步。Sidecar 主检测模式下直接读取语言服务器 `waitingSteps`，不受上述内存开关盲区影响。
+- **Sidecar 依赖内部接口**：`GetAllCascadeTrajectories` / `waitingSteps` 属于 Antigravity 未公开本地接口；若未来升级失效，会触发自动降级至 Hook 兜底模式。
 
 ---
 
@@ -79,7 +93,9 @@
 
 当升级 Antigravity 后发现“不响、误响、或白名单失效”，按以下 4 步排查：
 
-1. **先看执行日志**：读取状态目录下的 `history.jsonl` 最后 20 行，重点核对 `hookEventName`、`toolName`、`action`（`triggered` / `skipped`）、`reason`、`mappedEvent`。
+1. **先看执行日志与 Sidecar 状态**：
+   - 检查状态目录下的 `sidecar-state.json`（确认 `healthy: true` 且 `updatedAtMs` 在最近 15 秒内，以及是否有 `reason: "rpc_unavailable"`）；
+   - 读取状态目录下的 `history.jsonl` 最后 20 行，重点核对 `hookEventName`（`SidecarWaiting` / `PreToolUse` / `Stop`）、`toolName`、`action`（`triggered` / `skipped`）、`reason`、`mappedEvent`。
 2. **核对最新 Hook 协议**：查看 `~/.gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md`：
    - 若官方新增了原生的审批弹窗事件（如原生 `PermissionRequest`），可直接替换 `PreToolUse` 里的权限启发式判断。
    - 检查工具名或参数名是否变化（如 `BypassSandbox`、`CommandLine`、`ArtifactMetadata.RequestFeedback`、`Path`）。
@@ -111,7 +127,11 @@ py -3 $CLI test error
 - `SESSION_ALARM_DISABLE_NOTIFICATIONS=1`（禁用桌面通知）
 - `SESSION_ALARM_HOME=<临时目录>`（隔离 `history.jsonl`、`pending/` 与配置）
 - `SESSION_ALARM_AGY_CONFIG_DIR=<临时目录>`（模拟不同 Antigravity 权限档位与白名单）
-- `SESSION_ALARM_DELAY_READ_MS` / `SESSION_ALARM_DELAY_WRITE_MS` / `SESSION_ALARM_DELAY_COMMAND_MS` / `SESSION_ALARM_DELAY_MCP_MS`（可选，正整数毫秒，分别覆盖读文件、工作区外写文件、待审查命令与 MCP 默认 `5000` 延迟阈值）
+- `SESSION_ALARM_DISABLE_SIDECAR=1`（强制关闭 Sidecar 真弹窗检测，切回纯 Hook + 5 秒计时兜底模式）
+- `SESSION_ALARM_SIDECAR_ACTIVE_POLL_MS` / `SESSION_ALARM_SIDECAR_IDLE_POLL_MS`（可选，Sidecar 轮询间隔毫秒，默认活跃 `500` / 空闲 `2000`）
+- `SESSION_ALARM_SIDECAR_WAIT_GRACE_MS`（可选，检测到 `waitingSteps` 后的确认宽限毫秒，默认 `0`）
+- `SESSION_ALARM_SIDECAR_TTL_MS`（可选，`sidecar-state.json` 心跳有效期毫秒，默认 `15000`）
+- `SESSION_ALARM_DELAY_READ_MS` / `SESSION_ALARM_DELAY_WRITE_MS` / `SESSION_ALARM_DELAY_COMMAND_MS` / `SESSION_ALARM_DELAY_MCP_MS`（可选，正整数毫秒，分别覆盖 Hook 兜底模式下读文件、工作区外写文件、待审查命令与 MCP 默认 `5000` 延迟阈值）
 - `SESSION_ALARM_SKIP_MCP_PREFIXES`（可选，逗号分隔的受信任 MCP 前缀，默认不跳过；例如设为 `mcp_myserver_` 可跳过该前缀下的 MCP）
 
 ---

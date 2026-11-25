@@ -1,0 +1,7 @@
+{
+  "description": "Session Alarm watcher: polls Antigravity's local language server for waitingSteps so approval alerts trigger only on real popups.",
+  "display_name": "Session Alarm Watcher",
+  "command": "node",
+  "args": ["watcher.mjs"],
+  "restart_policy": "always"
+}

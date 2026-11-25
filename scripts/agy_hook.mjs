@@ -516,6 +516,18 @@ function getPendingDir() {
   return join(getSessionAlarmHome(), "pending");
 }
 
+function isSidecarHealthy() {
+  if (process.env.SESSION_ALARM_DISABLE_SIDECAR === "1") return false;
+  const rawTtl = process.env.SESSION_ALARM_SIDECAR_TTL_MS;
+  const parsedTtl = rawTtl !== undefined ? Number.parseInt(rawTtl, 10) : NaN;
+  const ttlMs = Number.isFinite(parsedTtl) && parsedTtl > 0 ? parsedTtl : 15000;
+  const state = readJsonSafe(join(getSessionAlarmHome(), "sidecar-state.json"));
+  if (!state || state.healthy !== true) return false;
+  const updatedAtMs = Number(state.updatedAtMs);
+  if (!Number.isFinite(updatedAtMs)) return false;
+  return Date.now() - updatedAtMs <= ttlMs;
+}
+
 function getPendingId(p) {
   const raw =
     typeof p?.toolCall?.id === "string" && p.toolCall.id.trim()
@@ -655,7 +667,7 @@ function appendHistoryLog(entry) {
   }
 }
 
-function buildMappedPayload(permCtx) {
+function buildMappedPayload(permCtx, sidecarActive = false) {
   if (hookEvent === "SessionStart") {
     return { mapped: { hook_event_name: "SessionStart" }, reason: "session_start" };
   }
@@ -663,6 +675,13 @@ function buildMappedPayload(permCtx) {
     const toolName = payload.toolCall?.name || "";
     const args = payload.toolCall?.args || {};
     if (toolName === "ask_question") {
+      if (sidecarActive) {
+        return {
+          mapped: null,
+          reason: "handled_by_sidecar",
+          decision: "allow",
+        };
+      }
       return {
         mapped: { hook_event_name: "PermissionRequest" },
         reason: "ask_question",
@@ -952,15 +971,16 @@ if (hookEvent === "Stop") {
   cancelConversationPendingAlerts(payload.conversationId);
 }
 
+const sidecarActive = hookEvent === "PreToolUse" ? isSidecarHealthy() : false;
 const permCtx = hookEvent === "PreToolUse" ? loadAgyPermissionContext(payload.workspacePaths) : null;
-const { mapped, reason, decision, logSkip, delayAlert } = buildMappedPayload(permCtx);
+const { mapped, reason, decision, logSkip, delayAlert } = buildMappedPayload(permCtx, sidecarActive);
 let output = hookEvent === "PreToolUse" ? { decision: decision || "allow" } : {};
 
-if (hookEvent === "PreToolUse" && delayAlert) {
+if (hookEvent === "PreToolUse" && delayAlert && !sidecarActive) {
   armDelayedAlert(delayAlert);
 }
 
-if (hookEvent === "Stop" || (hookEvent === "PreToolUse" && (mapped || logSkip))) {
+if (hookEvent === "Stop" || (hookEvent === "PreToolUse" && (mapped || (logSkip && !sidecarActive)))) {
   appendHistoryLog({
     action: mapped ? "triggered" : "skipped",
     reason,
