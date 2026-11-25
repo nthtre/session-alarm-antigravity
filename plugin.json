@@ -1,7 +1,7 @@
 {
   "name": "session-alarm",
   "displayName": "Session Alarm",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Local sound alerts for the Antigravity Desktop App (IDE/CLI untested), Codex, and Claude Code when the agent needs input, finishes work, or stops with an error.",
   "logo": "assets/session-alarm-logo.svg",
   "author": {
