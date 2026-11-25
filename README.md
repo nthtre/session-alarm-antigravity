@@ -143,6 +143,7 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 - **纯本地、不发外部请求**：不收集、不上传任何对话内容或代码（Sidecar 仅通过本机回环地址向 Antigravity 语言服务器查询 `waitingSteps` 状态），状态、心跳与最近 200 条触发元信息只保存在本机 `%APPDATA%\session-alarm\`（Windows）或 `~/.config/session-alarm/`（macOS/Linux），详见 [PRIVACY.md](PRIVACY.md)。
 - **MIT 协议**：代码与文档采用 [MIT License](LICENSE)（保留原作者 Danny 版权）。
 - **音频溯源**：12 个内置动物录音均核验为 CC0 1.0 Universal，详见 [SOUND_LICENSE.md](SOUND_LICENSE.md)、[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [assets/sounds/sources.json](assets/sounds/sources.json)。
+- **特别致谢**：通过 Sidecar 监听本地语言服务器 `waitingSteps` 实现真弹窗检测的思路受 [`KCFindstr/hagemi-pet-agy`](https://github.com/KCFindstr/hagemi-pet-agy)（Hagemi Pet，作者 [KCFindstr](https://github.com/KCFindstr)）启发，特此感谢！
 
 ## 已知边界：可能的误报与漏报（及原因）
 
@@ -304,6 +305,7 @@ python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 2
 - **Local only, no external network requests**: Never stores or transmits prompts or file contents (the Sidecar talks strictly over localhost loopback to Antigravity's language server for `waitingSteps`). Config, local WAV cache, heartbeat state, and the latest 200 hook/sidecar metadata lines live strictly in `%APPDATA%\session-alarm\` (Windows) or `~/.config/session-alarm/` (macOS/Linux). See [PRIVACY.md](PRIVACY.md).
 - **MIT License**: Code and docs are licensed under [MIT License](LICENSE) (Copyright (c) 2026 Danny).
 - **Sound provenance**: All 12 bundled animal recordings are CC0 1.0 Universal — see [SOUND_LICENSE.md](SOUND_LICENSE.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [assets/sounds/sources.json](assets/sounds/sources.json).
+- **Acknowledgements**: The Sidecar approach of polling Antigravity's local language server `waitingSteps` for real approval popup detection was inspired by [`KCFindstr/hagemi-pet-agy`](https://github.com/KCFindstr/hagemi-pet-agy) (Hagemi Pet by [KCFindstr](https://github.com/KCFindstr)). Special thanks to the author!
 
 ## Known Limitations: Possible False Alarms & Missed Alerts (and Why)
 
