@@ -99,11 +99,22 @@ python3 "$CLI" test all
 
 ```bash
 python3 "$CLI" custom add "/path/to/your-sound.wav" --name "My Alert" --id my-alert --preview
-python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 23:00-07:30
+python3 "$CLI" configure --attention custom:my-alert --volume 50
 ```
 
 > [!TIP]
 > 改声音或音量请用上面的 `configure` 命令，不要手动去改 `config.json`，命令会自动校验并生成对应音量的音频缓存。
+
+### 免打扰时段（默认关闭，可选）
+插件**默认不开启**免打扰时段（`quiet_hours.enabled` 默认为 `false`）。如果你希望在夜间等固定时间段静音，或之前顺带开启过想要关闭，可单独执行：
+
+```bash
+python3 "$CLI" configure --quiet-hours 23:00-07:30   # 开启免打扰（23:00 至次日 07:30 静音）
+python3 "$CLI" configure --quiet-hours off           # 关闭免打扰
+```
+
+> [!NOTE]
+> 免打扰时段采用 24 小时制 `HH:MM-HH:MM`（支持跨午夜）。可随时运行 `python3 "$CLI" status` 查看 `Quiet hours` 当前是 `off` 还是已启用的时段。
 
 ---
 
@@ -261,11 +272,22 @@ Import any local PCM WAV file you own or have rights to use (up to 30s / 32 MB) 
 
 ```bash
 python3 "$CLI" custom add "/path/to/your-sound.wav" --name "My Alert" --id my-alert --preview
-python3 "$CLI" configure --attention custom:my-alert --volume 50 --quiet-hours 23:00-07:30
+python3 "$CLI" configure --attention custom:my-alert --volume 50
 ```
 
 > [!TIP]
 > Always update settings through `configure` rather than editing `config.json` by hand so volume-scaled WAV caches are generated properly.
+
+### Quiet hours (off by default, optional)
+Quiet hours are **disabled by default** (`quiet_hours.enabled` is `false`). If you want to mute alerts during specific hours (e.g., overnight), or turn them back off later, run `configure --quiet-hours` separately:
+
+```bash
+python3 "$CLI" configure --quiet-hours 23:00-07:30   # Enable quiet hours (mute 23:00–07:30)
+python3 "$CLI" configure --quiet-hours off           # Disable quiet hours
+```
+
+> [!NOTE]
+> Quiet hours use 24-hour `HH:MM-HH:MM` format (overnight ranges supported). Run `python3 "$CLI" status` anytime to verify whether `Quiet hours` is `off` or active.
 
 ---
 

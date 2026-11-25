@@ -31,11 +31,13 @@
 
 ## 2. Antigravity 增强特性清单（与上游原版的差异）
 
-### 2.1 默认声音映射（内置 CC0 动物音效）
+### 2.1 默认配置与声音映射（内置 CC0 动物音效）
 - **`attention`（等待审批/输入）**：`cat`
 - **`complete`（任务完成）**：`rooster`
 - **`error`（发生错误）**：`crow`
 - **`session_end`（会话结束）**：已静默（`hooks.json` 未监听 `SessionEnd`，且 `core.py` 中 `SessionEnd` 直接 `return None`）
+- **免打扰时段（`quiet_hours`）默认关闭**：`core.py` 的 `default_config()` 中 `quiet_hours.enabled` 默认为 `false`（仅预置 `22:00`–`08:00` 参考时段）；只有交互向导 `setup` 主动启用或通过 `configure --quiet-hours HH:MM-HH:MM` 显式配置后才会生效（可随时用 `configure --quiet-hours off` 关闭）。
+- **未初始化默认不发声**：本地 `config.json` 尚未创建时，`load_config()` 返回 `None`，`notify_event()` 直接返回 `"not configured"`；`SessionStart` 会注入一次首次配置引导。
 
 用户可通过 `session_alarm.py custom add` 与 `configure` 在本机自行替换为任意合法本地 WAV。
 
@@ -115,7 +117,7 @@
 4. **核对 Hook 兜底模式权限联动（注意硬编码安全边界）**：
    - Antigravity 对 `~/.gemini/config/config.json` 设有硬编码系统保护边界，会直接拒绝 AI 代理的 `read_file` 工具访问（`agy_hook.mjs` 作为外部 Node 进程直接读取本地文件，不受影响）。
    - **请勿让 AI 直接 `read_file` 读取 `config.json`**；应先通过 `history.jsonl` 中是否出现 `allowed_by_permission_grant` / `skipped_by_turbo_mode` 间接验证权限联动是否生效；仅在怀疑字段结构变化时，由用户手动贴出脱敏后的 `userSettings`（`permissionPreset`、`autoExecutionPolicy`、`nonWorkspaceFileAccessPolicy`、`globalPermissionGrants.allow`）与 `projects/*.json`（`projectResources.resources[].folderUri`、`permissionGrants`、`settings`）键名片段。
-5. **区分 Sidecar/Hook 问题还是音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；若 `test` 能正常出声但对话不响，说明问题在 `sidecars/watcher/`、`hooks.json` 或 `agy_hook.mjs`。注意：Windows 下若在受限终端沙箱中运行，`py -3` 或读取 `%APPDATA%\session-alarm\config.json` 可能因权限边界报错，请在普通 PowerShell 终端或沙箱外通过 uv 管理的 `python.exe` 执行 `status` / `test`。
+5. **区分 Sidecar/Hook 问题还是配置/音频/Python 问题**：运行 CLI 的 `status` 和 `test` 命令；先确认 `status` 中 `Enabled: True` 且 `Quiet hours: off`（或当前不在免打扰时段内）——注意 **`test` 会以 `force=True` 强制发声（会绕过 `enabled: false` 与 `quiet_hours`）**，因此若 `test` 能响但真实对话不响，先看 `status` 排除免打扰/停用，再排查 `sidecars/watcher/`、`hooks.json` 或 `agy_hook.mjs`。注意：Windows 下若在受限终端沙箱中运行，`py -3` 或读取 `%APPDATA%\session-alarm\config.json` 可能因权限边界报错，请在普通 PowerShell 终端或沙箱外通过 uv 管理的 `python.exe` 执行 `status` / `test`。
 
 ---
 
@@ -131,6 +133,8 @@ py -3 $CLI status
 py -3 $CLI test attention
 py -3 $CLI test complete
 py -3 $CLI test error
+py -3 $CLI configure --quiet-hours 23:00-07:30   # 按需开启免打扰（默认关闭）
+py -3 $CLI configure --quiet-hours off           # 关闭免打扰
 ```
 
 ### 静音隔离测试 Sidecar 与 Hook（不发声、不污染真实日志）
